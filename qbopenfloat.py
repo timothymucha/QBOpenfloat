@@ -41,7 +41,7 @@ def generate_iif(df):
         payee = sanitize_payee(row.get("Account Name", ""))
         remark = str(row.get("Remark", "")).strip()
         memo = f"{payee} - {remark}".strip(" -")
-        reference = str(row.get("Reference Id", "")).strip() or "N/A"
+        reference = str(row.get("Receipt Number", "")).strip() or "N/A"
 
         amount = parse_float(row.get("Amount", 0))
         charges = parse_float(row.get("Charges", 0))
