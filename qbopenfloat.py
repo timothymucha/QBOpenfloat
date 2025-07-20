@@ -67,7 +67,7 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
 
         # Convert
-        iif_data = generate_iif(df)
+        iif_data = convert_pesapal_to_iif(df)
 
         # Download
         st.success("✅ Conversion successful!")
