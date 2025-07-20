@@ -3,9 +3,8 @@ import pandas as pd
 from io import StringIO
 
 # Chart of Accounts (adjust if needed)
-openfloat_account = "Garidon Openfloat"
-pesapal_bank_account = "Pesapal Bank"
-dtb_account = "DTB Bank"
+openfloat_account = "Openfloat"
+pesapal_bank_account = "Pesapal"
 bank_fees_account = "Bank Service Charges"
 accounts_payable = "Accounts Payable"
 
@@ -27,7 +26,7 @@ def generate_iif(df):
     # IIF Header
     output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
     output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
-    output.write("ENDTRNS\n")
+    output.write("!ENDTRNS\n")
 
     for _, row in df.iterrows():
         txn_type = str(row.get("Transaction Type", "")).strip()
@@ -62,9 +61,9 @@ def generate_iif(df):
                 output.write("ENDTRNS\n")
 
         elif txn_type == "PesapalWithdrawal" and credit > 0:
-            # Transfer from Pesapal to DTB
+            # Transfer from Pesapal
             output.write(f"TRNS\tTRANSFER\t{date}\t{pesapal_bank_account}\t{payee}\t{-credit}\t{memo}\tN\n")
-            output.write(f"SPL\tTRANSFER\t{date}\t{dtb_account}\t\t{credit}\t{memo}\tN\n")
+            output.write(f"SPL\tTRANSFER\t{date}\t{{openfloat_account}\t\t{credit}\t{memo}\tN\n")
             output.write("ENDTRNS\n")
 
     return output.getvalue()
