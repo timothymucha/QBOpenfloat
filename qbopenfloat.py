@@ -49,8 +49,8 @@ def generate_iif(df):
         credit = parse_float(row.get("Credit", 0))
 
         if txn_type == "Payment" and amount > 0:
-            output.write(f"TRNS\tBILLPMT\t{date}\t{openfloat_account}\t{payee}\t{-amount:.2f}\t{reference}\t{memo}\tN\n")
-            output.write(f"SPL\tBILLPMT\t{date}\t{accounts_payable}\t{payee}\t{amount:.2f}\t{memo}\tN\n")
+            output.write(f"TRNS\tCHECK\t{date}\t{openfloat_account}\t{payee}\t{-amount:.2f}\t{reference}\t{memo}\tN\n")
+            output.write(f"SPL\tCHECK\t{date}\t{accounts_payable}\t{payee}\t{amount:.2f}\t{memo}\tN\n")
             output.write("ENDTRNS\n")
 
         elif txn_type == "PesapalWithdrawal" and credit > 0:
