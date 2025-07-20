@@ -1,63 +1,72 @@
 import streamlit as st
 import pandas as pd
 from io import StringIO
-from datetime import datetime
 
-def convert_pesapal_to_iif(file):
-    df = pd.read_csv(file, skiprows=6)
+# Chart of Accounts
+openfloat_account = "Openfloat"
+pesapal_bank_account = "Pesapal"
+bank_fees_account = "Bank Service Charges"
+accounts_payable = "Accounts Payable"
 
-    # Normalize and clean up column names
-    df.columns = df.columns.str.strip()
-    
-    iif_output = StringIO()
-    iif_output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
-    iif_output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
-    iif_output.write("!ENDTRNS\n")
+def sanitize_payee(name):
+    if pd.isna(name):
+        return "Unknown Payee"
+    return str(name).strip()
+
+def parse_float(value):
+    try:
+        return float(str(value).replace(",", "").strip())
+    except:
+        return 0.0
+
+def generate_iif(df):
+    output = StringIO()
+
+    # IIF Headers
+    output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
+    output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
+    output.write("!ENDTRNS\n")
 
     for _, row in df.iterrows():
-        txn_type = row.get("Transaction Type", "").strip()
-        date_str = row.get("Date", "").strip()
+        txn_type = str(row.get("Transaction Type", "")).strip()
+        status = str(row.get("Transaction Status", "")).strip()
+        if status != "Successful":
+            continue
+
         try:
-            txn_date = datetime.strptime(date_str, "%d/%m/%Y %I:%M:%S %p").strftime("%m/%d/%Y")
+            date = pd.to_datetime(row["Date"]).strftime("%m/%d/%Y")
         except:
-            continue  # Skip malformed date
+            continue  # skip bad dates
 
-        account_name = str(row.get("Account Name", "")).strip()
+        payee = sanitize_payee(row.get("Account Name", ""))
         remark = str(row.get("Remark", "")).strip()
-        memo = f"{account_name} - {remark}" if remark else account_name
+        memo = f"{payee} - {remark}".strip(" -")
 
-        if txn_type == "Payment":
-            amount = float(str(row.get("Amount", "0")).replace(",", "").strip())
-            if amount <= 0:
-                continue  # skip invalid payments
+        amount = parse_float(row.get("Amount", 0))
+        charges = parse_float(row.get("Charges", 0))
+        commission = parse_float(row.get("Commission Amount", 0))
+        credit = parse_float(row.get("Credit", 0))
 
-            iif_output.write(f"TRNS\tBILL\t{txn_date}\tOpenfloat\t{account_name}\t{-amount:.2f}\t{memo}\tN\n")
-            iif_output.write(f"SPL\tBILL\t{txn_date}\tAccounts Payable\t{account_name}\t{amount:.2f}\t{memo}\tN\n")
-            iif_output.write("ENDTRNS\n")
+        if txn_type == "Payment" and amount > 0:
+            output.write(f"TRNS\tBILL\t{date}\t{openfloat_account}\t{payee}\t{-amount:.2f}\t{memo}\tN\n")
+            output.write(f"SPL\tBILL\t{date}\t{accounts_payable}\t{payee}\t{amount:.2f}\t{memo}\tN\n")
+            output.write("ENDTRNS\n")
 
-        elif txn_type == "PesapalWithdrawal":
-            credit = float(str(row.get("Credit", "0")).replace(",", "").strip())
-            if credit <= 0:
-                continue  # skip invalid transfers
+        elif txn_type == "PesapalWithdrawal" and credit > 0:
+            output.write(f"TRNS\tTRANSFER\t{date}\t{pesapal_bank_account}\t{payee}\t{-credit:.2f}\t{memo}\tN\n")
+            output.write(f"SPL\tTRANSFER\t{date}\t{openfloat_account}\t\t{credit:.2f}\t{memo}\tN\n")
+            output.write("ENDTRNS\n")
 
-            iif_output.write(f"TRNS\tTRANSFER\t{txn_date}\tPesapal\t\t{-credit:.2f}\tPesapal to DTB\tN\n")
-            iif_output.write(f"SPL\tTRANSFER\t{txn_date}\tDTB\t\t{credit:.2f}\tPesapal to DTB\tN\n")
-            iif_output.write("ENDTRNS\n")
+        elif txn_type in ["Charges", "Commission"] or (charges > 0 or commission > 0):
+            total_fees = charges + commission
+            if total_fees > 0:
+                fee_memo = f"Bank Fees - {remark}" if remark else "Bank Fees"
+                output.write(f"TRNS\tCHECK\t{date}\t{openfloat_account}\t{payee}\t{-total_fees:.2f}\t{fee_memo}\tN\n")
+                output.write(f"SPL\tCHECK\t{date}\t{bank_fees_account}\t{payee}\t{total_fees:.2f}\t{fee_memo}\tN\n")
+                output.write("ENDTRNS\n")
 
-        elif txn_type in ["Charges", "Commission"]:
-            charges = float(str(row.get("Charges", "0")).replace(",", "").strip() or 0)
-            commission = float(str(row.get("Commission Amount", "0")).replace(",", "").strip() or 0)
-            total_fee = charges + commission
-            if total_fee <= 0:
-                continue  # no fees to record
+    return output.getvalue()
 
-            fee_memo = f"Bank Fees - {remark}" if remark else "Bank Fees"
-
-            iif_output.write(f"TRNS\tBILL\t{txn_date}\tOpenfloat\t{account_name}\t{-total_fee:.2f}\t{fee_memo}\tN\n")
-            iif_output.write(f"SPL\tBILL\t{txn_date}\tBank Service Charges\t{account_name}\t{total_fee:.2f}\t{fee_memo}\tN\n")
-            iif_output.write("ENDTRNS\n")
-
-    return iif_output.getvalue()
 # Streamlit UI
 st.title("🔁 Openfloat CSV to QuickBooks IIF Converter")
 uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
@@ -65,11 +74,8 @@ uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
 if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
+        iif_data = generate_iif(df)
 
-        # Convert
-        iif_data = convert_pesapal_to_iif(df)
-
-        # Download
         st.success("✅ Conversion successful!")
         st.download_button("📥 Download IIF File", iif_data, file_name="openfloat.iif", mime="text/plain")
     except Exception as e:
