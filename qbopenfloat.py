@@ -1,3 +1,24 @@
+import streamlit as st
+import pandas as pd
+from io import StringIO
+
+# Chart of Accounts
+openfloat_account = "Openfloat"
+pesapal_bank_account = "Pesapal"
+bank_fees_account = "Bank Service Charges"
+accounts_payable = "Accounts Payable"
+
+def sanitize_payee(name):
+    if pd.isna(name):
+        return "Pesapal"
+    return str(name).strip()
+
+def parse_float(value):
+    try:
+        return float(str(value).replace(",", "").strip())
+    except:
+        return 0.0
+
 def generate_iif(df):
     output = StringIO()
 
@@ -46,3 +67,17 @@ def generate_iif(df):
                 output.write("ENDTRNS\n")
 
     return output.getvalue()
+
+# Streamlit UI
+st.title("🔁 Openfloat CSV to QuickBooks IIF Converter")
+uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
+
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+        iif_data = generate_iif(df)
+
+        st.success("✅ Conversion successful!")
+        st.download_button("📥 Download IIF File", iif_data, file_name="openfloat.iif", mime="text/plain")
+    except Exception as e:
+        st.error(f"❌ Error during conversion: {e}")
