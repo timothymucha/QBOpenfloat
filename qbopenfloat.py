@@ -52,8 +52,8 @@ def generate_iif(df):
 
 
 # Streamlit UI
-st.title("Pesapal to QuickBooks IIF Converter")
-uploaded_file = st.file_uploader("Upload Pesapal CSV", type=["csv"])
+st.title("Openfloat to QuickBooks IIF Converter")
+uploaded_file = st.file_uploader("Upload Openfloat CSV", type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
