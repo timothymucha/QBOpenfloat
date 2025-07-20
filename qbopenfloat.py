@@ -26,7 +26,7 @@ def generate_iif(df):
             continue
 
         txn_type = row["Transaction Type"].strip()
-        date = pd.to_datetime(row["Transaction Date"]).strftime('%m/%d/%Y')
+        date = pd.to_datetime(row["Date"]).strftime('%m/%d/%Y')
         payee = clean_payee(row.get("Payee", "Unknown"))
         memo = f"{payee} {row.get('Remark', '')}".strip()
 
