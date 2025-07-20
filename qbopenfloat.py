@@ -57,15 +57,19 @@ def convert_pesapal_to_iif(file):
             iif_output.write("ENDTRNS\n")
 
     return iif_output.getvalue()
-# Streamlit App
-st.title("Pesapal to QuickBooks IIF Converter")
+# Streamlit UI
+st.title("🔁 Openfloat CSV to QuickBooks IIF Converter")
+uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
 
-uploaded_file = st.file_uploader("Upload Pesapal CSV", type="csv")
-if uploaded_file:
+if uploaded_file is not None:
     try:
-        df = pd.read_csv(uploaded_file, skiprows=0)
+        df = pd.read_csv(uploaded_file)
+
+        # Convert
         iif_data = generate_iif(df)
-        st.download_button("Download IIF", data=iif_data, file_name="pesapal_import.iif", mime="text/plain")
-        st.text_area("Preview IIF", iif_data, height=300)
+
+        # Download
+        st.success("✅ Conversion successful!")
+        st.download_button("📥 Download IIF File", iif_data, file_name="openfloat.iif", mime="text/plain")
     except Exception as e:
-        st.error(f"❌ Failed to process file: {e}")
+        st.error(f"❌ Error during conversion: {e}")
