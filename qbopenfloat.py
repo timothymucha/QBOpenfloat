@@ -41,7 +41,8 @@ def generate_iif(df):
 
         payee = sanitize_payee(str(row.get("Payee", "")).strip())
         remark = str(row.get("Remark", "")).strip()
-        memo = f"{payee} - {remark}" if remark else payee
+        memo = f"{row.get('Payee', '')} - {row.get('Remark', '')}".strip(" -")
+
 
         amount = parse_float(row.get("Amount", 0))
         charges = parse_float(row.get("Charges", 0))
