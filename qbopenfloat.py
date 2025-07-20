@@ -2,67 +2,75 @@ import streamlit as st
 import pandas as pd
 from io import StringIO
 
-st.title("Openfloat CSV to QuickBooks IIF Converter")
-uploaded_file = st.file_uploader("Upload Openfloat CSV file", type="csv")
+# Set account names (update as needed)
+OPENFLOAT_ACCOUNT = "Openfloat"
+PESAPAL_ACCOUNT = "Pesapal"
+BANK_FEES_ACCOUNT = "Bank Service Charges"
+ACCOUNTS_PAYABLE = "Accounts Payable"
 
-def clean_amount(val):
+# IIF headers
+IIF_HEADER = "!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tMEMO\tAMOUNT\tDOCNUM\n!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tMEMO\tAMOUNT\nENDTRNS"
+
+def clean_amount(value):
     try:
-        return float(str(val).replace(',', '').strip())
+        return float(str(value).replace(",", "").strip())
     except:
         return 0.0
 
 def clean_payee(name):
-    if isinstance(name, str):
-        return ' '.join(word for word in name.split() if not word.isdigit())
-    return name
+    # Remove paybill number if in format "123456 - XYZ Supplier"
+    if "-" in name:
+        parts = name.split("-")
+        if len(parts) > 1:
+            return parts[1].strip()
+    return name.strip()
 
 def generate_iif(df):
     output = StringIO()
-    output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tMEMO\tAMOUNT\n")
-    output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tMEMO\tAMOUNT\n")
-    output.write("!ENDTRNS\n")
+    output.write(IIF_HEADER + "\n")
 
     for _, row in df.iterrows():
-        date = pd.to_datetime(row['Date']).strftime('%m/%d/%Y')
-        status = row['Transaction Status']
-        if status != "Successful":
-            continue
+        tx_type = row["Transaction Type"]
+        date = pd.to_datetime(row["Date"]).strftime("%m/%d/%Y")
+        payee = clean_payee(row["Account Name"])
+        memo = f"{payee} - {row['Remark']}".strip()
 
-        tx_type = row['Transaction Type']
-        raw_payee = str(row.get("Account Name", "Unknown"))
-        payee = clean_payee(raw_payee)
-        remark = str(row.get("Remark", "")).strip()
-        memo = f"{payee} - {remark}"
+        if tx_type == "Payment":
+            amount = clean_amount(row["Amount"])
+            output.write(f"TRNS\tBILL\t{date}\t{ACCOUNTS_PAYABLE}\t{payee}\t{memo}\t{-amount}\t\n")
+            output.write(f"SPL\tBILL\t{date}\t{OPENFLOAT_ACCOUNT}\t{payee}\t{memo}\t{amount}\nENDTRNS\n")
 
-        amount = clean_amount(row.get("Amount", 0))
-        charges = clean_amount(row.get("Charges", 0))
-        credit = clean_amount(row.get("Credit", 0))
-        debit = clean_amount(row.get("Debit", 0))
+        elif tx_type == "PesapalWithdrawal":
+            amount = clean_amount(row["Credit"])
+            output.write(f"TRNS\tTRANSFER\t{date}\t{PESAPAL_ACCOUNT}\t{payee}\t{memo}\t{-amount}\t\n")
+            output.write(f"SPL\tTRANSFER\t{date}\t{OPENFLOAT_ACCOUNT}\t{payee}\t{memo}\t{amount}\nENDTRNS\n")
 
-        if tx_type == "PesapalWithdrawal":
-            # Transfer from Pesapal to Openfloat
-            output.write(f"TRNS\tTRANSFER\t{date}\tPesapal\t\t{memo}\t{-debit}\n")
-            output.write(f"SPL\tTRANSFER\t{date}\tOpenfloat\t\t{memo}\t{debit}\n")
-            output.write("ENDTRNS\n")
         elif tx_type in ["Charges", "Commission"]:
-            # Expense: Bank Charges
-            output.write(f"TRNS\tCHECK\t{date}\tOpenfloat\t{payee}\t{memo}\t{-charges}\n")
-            output.write(f"SPL\tCHECK\t{date}\tBank Service Charges\t\t{memo}\t{charges}\n")
-            output.write("ENDTRNS\n")
-        elif tx_type == "Payment":
-            # Bill Payment
-            output.write(f"TRNS\tBILLPMT\t{date}\tOpenfloat\t{payee}\t{memo}\t{-debit}\n")
-            output.write(f"SPL\tBILLPMT\t{date}\tAccounts Payable\t\t{memo}\t{debit}\n")
-            output.write("ENDTRNS\n")
+            amount = clean_amount(row["Charges"])
+            output.write(f"TRNS\tCHECK\t{date}\t{OPENFLOAT_ACCOUNT}\t{BANK_FEES_ACCOUNT}\t{memo}\t{-amount}\t\n")
+            output.write(f"SPL\tCHECK\t{date}\t{BANK_FEES_ACCOUNT}\t{BANK_FEES_ACCOUNT}\t{memo}\t{amount}\nENDTRNS\n")
 
     return output.getvalue()
 
-if uploaded_file is not None:
+# Streamlit UI
+st.title("🔁 Openfloat CSV to QuickBooks IIF Converter")
+
+uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
+
+if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
-        st.dataframe(df.head())
+
+        # Standardize column names
+        df.columns = df.columns.str.strip()
+
+        # Filter successful transactions only
+        df = df[df["Transaction Status"].str.strip().str.lower() == "successful"]
 
         iif_data = generate_iif(df)
-        st.download_button("Download IIF File", iif_data, file_name="openfloat.iif", mime="text/plain")
+
+        st.success("✅ Conversion complete! Download your IIF file below.")
+        st.download_button("📥 Download .IIF file", iif_data, file_name="openfloat_converted.iif")
+
     except Exception as e:
         st.error(f"❌ Error during conversion: {e}")
