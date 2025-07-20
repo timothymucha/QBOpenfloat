@@ -1,87 +1,71 @@
-import streamlit as st
 import pandas as pd
 from io import StringIO
+from datetime import datetime
 
-# Chart of Accounts (adjust if needed)
-openfloat_account = "Openfloat"
-pesapal_bank_account = "Pesapal"
-bank_fees_account = "Bank Service Charges"
-accounts_payable = "Accounts Payable"
+def convert_pesapal_to_iif(file):
+    df = pd.read_csv(file, skiprows=6)
 
-def sanitize_payee(name):
-    if pd.isna(name):
-        return "Unknown Payee"
-    # Remove numbers (e.g., paybill)
-    return ''.join([i for i in name if not i.isdigit()]).strip()
-
-def parse_float(value):
-    try:
-        return float(str(value).replace(",", "").strip())
-    except:
-        return 0.0
-
-def generate_iif(df):
-    output = StringIO()
+    # Normalize and clean up column names
+    df.columns = df.columns.str.strip()
     
-    # IIF Header
-    output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
-    output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
-    output.write("!ENDTRNS\n")
+    iif_output = StringIO()
+    iif_output.write("!TRNS\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
+    iif_output.write("!SPL\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tMEMO\tCLEAR\n")
+    iif_output.write("!ENDTRNS\n")
 
     for _, row in df.iterrows():
-        txn_type = str(row.get("Transaction Type", "")).strip()
-        status = str(row.get("Transaction Status", "")).strip()
-        if status != "Successful":
-            continue
-
+        txn_type = row.get("Transaction Type", "").strip()
+        date_str = row.get("Date", "").strip()
         try:
-            date = pd.to_datetime(row["Date"]).strftime("%m/%d/%Y")
+            txn_date = datetime.strptime(date_str, "%d/%m/%Y %I:%M:%S %p").strftime("%m/%d/%Y")
         except:
-            continue  # skip if date invalid
+            continue  # Skip malformed date
 
-        payee = sanitize_payee(str(row.get("Payee", "")).strip())
+        account_name = str(row.get("Account Name", "")).strip()
         remark = str(row.get("Remark", "")).strip()
-        memo = f"{row.get('Payee', '')} - {row.get('Remark', '')}".strip(" -")
+        memo = f"{account_name} - {remark}" if remark else account_name
 
+        if txn_type == "Payment":
+            amount = float(str(row.get("Amount", "0")).replace(",", "").strip())
+            if amount <= 0:
+                continue  # skip invalid payments
 
-        amount = parse_float(row.get("Amount", 0))
-        charges = parse_float(row.get("Charges", 0))
-        credit = parse_float(row.get("Credit", 0))
+            iif_output.write(f"TRNS\tBILL\t{txn_date}\tOpenfloat\t{account_name}\t{-amount:.2f}\t{memo}\tN\n")
+            iif_output.write(f"SPL\tBILL\t{txn_date}\tAccounts Payable\t{account_name}\t{amount:.2f}\t{memo}\tN\n")
+            iif_output.write("ENDTRNS\n")
 
-        if txn_type == "Payment" and amount > 0:
-            # Bill Payment from Openfloat
-            output.write(f"TRNS\tBILL\t{date}\t{openfloat_account}\t{payee}\t{-amount}\t{memo}\tN\n")
-            output.write(f"SPL\tBILL\t{date}\t{accounts_payable}\t{payee}\t{amount}\t{memo}\tN\n")
-            output.write("ENDTRNS\n")
+        elif txn_type == "PesapalWithdrawal":
+            credit = float(str(row.get("Credit", "0")).replace(",", "").strip())
+            if credit <= 0:
+                continue  # skip invalid transfers
 
-        elif txn_type == "Charges" or txn_type == "Commission":
-            # Bank Fees from Openfloat
-            if charges > 0:
-                output.write(f"TRNS\tCHECK\t{date}\t{openfloat_account}\t{payee}\t{-charges}\t{memo}\tN\n")
-                output.write(f"SPL\tCHECK\t{date}\t{bank_fees_account}\t\t{charges}\t{memo}\tN\n")
-                output.write("ENDTRNS\n")
+            iif_output.write(f"TRNS\tTRANSFER\t{txn_date}\tPesapal\t\t{-credit:.2f}\tPesapal to DTB\tN\n")
+            iif_output.write(f"SPL\tTRANSFER\t{txn_date}\tDTB\t\t{credit:.2f}\tPesapal to DTB\tN\n")
+            iif_output.write("ENDTRNS\n")
 
-        elif txn_type == "PesapalWithdrawal" and credit > 0:
-            # Transfer from Pesapal
-            output.write(f"TRNS\tTRANSFER\t{date}\t{pesapal_bank_account}\t{payee}\t{-credit}\t{memo}\tN\n")
-            output.write(f"SPL\tTRANSFER\t{date}\t{openfloat_account}\t\t{credit}\t{memo}\tN\n")
-            output.write("ENDTRNS\n")
+        elif txn_type in ["Charges", "Commission"]:
+            charges = float(str(row.get("Charges", "0")).replace(",", "").strip() or 0)
+            commission = float(str(row.get("Commission Amount", "0")).replace(",", "").strip() or 0)
+            total_fee = charges + commission
+            if total_fee <= 0:
+                continue  # no fees to record
 
-    return output.getvalue()
+            fee_memo = f"Bank Fees - {remark}" if remark else "Bank Fees"
 
-# Streamlit UI
-st.title("🔁 Openfloat CSV to QuickBooks IIF Converter")
-uploaded_file = st.file_uploader("Upload Openfloat CSV file", type=["csv"])
+            iif_output.write(f"TRNS\tBILL\t{txn_date}\tOpenfloat\t{account_name}\t{-total_fee:.2f}\t{fee_memo}\tN\n")
+            iif_output.write(f"SPL\tBILL\t{txn_date}\tBank Service Charges\t{account_name}\t{total_fee:.2f}\t{fee_memo}\tN\n")
+            iif_output.write("ENDTRNS\n")
 
-if uploaded_file is not None:
+    return iif_output.getvalue()
+# Streamlit App
+st.title("Pesapal to QuickBooks IIF Converter")
+
+uploaded_file = st.file_uploader("Upload Pesapal CSV", type="csv")
+if uploaded_file:
     try:
-        df = pd.read_csv(uploaded_file)
-
-        # Convert
+        df = pd.read_csv(uploaded_file, skiprows=0)
         iif_data = generate_iif(df)
-
-        # Download
-        st.success("✅ Conversion successful!")
-        st.download_button("📥 Download IIF File", iif_data, file_name="openfloat.iif", mime="text/plain")
+        st.download_button("Download IIF", data=iif_data, file_name="pesapal_import.iif", mime="text/plain")
+        st.text_area("Preview IIF", iif_data, height=300)
     except Exception as e:
-        st.error(f"❌ Error during conversion: {e}")
+        st.error(f"❌ Failed to process file: {e}")
