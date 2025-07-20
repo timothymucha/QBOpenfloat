@@ -10,7 +10,7 @@ accounts_payable = "Accounts Payable"
 
 def sanitize_payee(name):
     if pd.isna(name):
-        return "Unknown Payee"
+        return "Pesapal"
     return str(name).strip()
 
 def parse_float(value):
