@@ -63,7 +63,7 @@ def generate_iif(df):
         elif txn_type == "PesapalWithdrawal" and credit > 0:
             # Transfer from Pesapal
             output.write(f"TRNS\tTRANSFER\t{date}\t{pesapal_bank_account}\t{payee}\t{-credit}\t{memo}\tN\n")
-            output.write(f"SPL\tTRANSFER\t{date}\t{{openfloat_account}\t\t{credit}\t{memo}\tN\n")
+            output.write(f"SPL\tTRANSFER\t{date}\t{openfloat_account}\t\t{credit}\t{memo}\tN\n")
             output.write("ENDTRNS\n")
 
     return output.getvalue()
