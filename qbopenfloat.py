@@ -25,7 +25,7 @@ def generate_iif(df):
             continue
 
         tr_type = row['Transaction Type'].strip()
-        date = pd.to_datetime(row['Transaction Date']).strftime('%m/%d/%Y')
+        date = pd.to_datetime(row['Date']).strftime('%m/%d/%Y')
         payee = row['Payee'].split()[0]  # Remove paybill if included
         memo = f"{payee} - {row['Remark']}"
         amount = float(row['Amount'])
